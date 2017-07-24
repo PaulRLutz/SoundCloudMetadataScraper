@@ -30,21 +30,29 @@ def get_user_playlists_urls(driver, user_id=None):
     driver.find_element_by_xpath(f'//a[@href="/{user_id}/sets"]').click()
   time.sleep(3)
 
-  set_names = []
-  set_names_old = []
+  element_lambda = lambda temp_driver : [a.get_attribute("href") for a in temp_driver.find_elements_by_xpath('//a[contains(@href, "/sets/")]') if "tracks" not in a.text]
+
+  return get_element_list_scrolling(driver, element_lambda)
+
+def get_element_list_scrolling(driver, element_lambda):
+  elements = []
+  elements_old = []
+
   while True:
     driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
     time.sleep(3) # TODO Replace with wait
-    set_names_old = list(set_names)
-    set_names = [a.text for a in driver.find_elements_by_xpath('//a[contains(@href, "/sets/")]') if "tracks" not in a.text]
-    if len(set_names) > len(set_names_old):
-      log.debug("found new sets, keep scrolling")
+    elements_old = list(elements)
+    elements = element_lambda(driver)
+    print(f"num set elements: {len(elements)}, num old set elements: {len(elements_old)}")
+    if len(elements) > len(elements_old):
+      print("found new sets, keep scrolling")
       pass # found some new set names, so scroll and try again
     else:
-      log.debug("no more sets found")
+      print("no more sets found")
       break # no more set names were found after scrolling, so we're probably done
+  return element_lambda(driver)
 
-  return [a.get_attribute("href") for a in driver.find_elements_by_xpath('//a[contains(@href, "/sets/")]') if "tracks" not in a.text]
+
 
 def get_tracks_from_url(driver, url):
   driver.get(url)
@@ -65,21 +73,10 @@ def get_tracks_from_url(driver, url):
     set_user = None
     set_user_id = None
 
-  track_elements = []
-  old_track_elements = []
+  element_lambda = lambda temp_driver : temp_driver.find_elements_by_class_name("trackList__item")
 
-  while True:
-    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-    time.sleep(4) # TODO Replace with wait
-    old_track_elements = list(track_elements)
-    track_elements = driver.find_elements_by_class_name("trackList__item")
-    log.debug(f"num track elements: {len(track_elements)}, num old track elements: {len(old_track_elements)}")
-    if len(track_elements) > len(old_track_elements):
-      log.debug("found new track_elements, keep scrolling")
-      pass # found some new track_elements, so scroll and try again
-    else:
-      log.debug("no more track_elements found")
-      break # no more track_elements were found after scrolling, so we're probably done
+  track_elements = get_element_list_scrolling(driver, element_lambda)
+
   tracks = []
   for track_element in track_elements:
     try:
