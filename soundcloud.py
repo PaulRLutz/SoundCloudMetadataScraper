@@ -15,7 +15,6 @@ import logging
 
 log = logging.getLogger()
 log.setLevel(logging.DEBUG)
-
 def get_user_playlists_urls(driver, user_id=None):
   if user_id is not None:
     driver.get(f"https://soundcloud.com/{user_id}")
