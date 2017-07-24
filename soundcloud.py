@@ -10,6 +10,7 @@ import os
 from os.path import expanduser
 import configparser
 import argparse
+from pyvirtualdisplay import Display
 
 def get_user_playlists_urls(driver, user_id=None):
   if user_id is not None:
@@ -100,11 +101,13 @@ def get_tracks_from_url(driver, url):
         "artist" : artist,
         "href" : href,
         "go" : go,
-
+        "set_title" : set_title,
+        "set_user" : set_user,
+        "set_user_id" : set_user_id,
         }
     tracks.append(track)
 
-  return (set_title, set_user, tracks, set_user_id)
+  return tracks
 
 def get_firefox_profile_path(profiles_folder_path="~/.mozilla/firefox", profile_name="Profile0"):
   """Gets the path to a firefox profile folder.
@@ -174,6 +177,12 @@ def main(test_args=None):
       help="The name of the firefox profile to use, from the setting.ini in the firefox profile folder (probably ~/.mozilla/firefox). Default is 'Profile0'"
   )
   parser.add_argument(
+      "-v", "--virtual",
+      action="store_true",
+      default=True,
+      help="Perform the scraping in a virtual display if True."
+  )
+  parser.add_argument(
       "-p", "--playlists",
       action="store_true",
       default=False,
@@ -203,14 +212,13 @@ def main(test_args=None):
   else:
     args = parser.parse_args()
 
+  if args.virtual:
+    virtual_display = get_virtual_display()
+  else:
+    virtual_display = None
 
   firefox_profile_path = get_firefox_profile_path(profile_name=args.firefox_profile_name)
-
-  if firefox_profile_path is not None:
-    profile = webdriver.FirefoxProfile(firefox_profile_path)
-    driver = webdriver.Firefox(profile)
-  else:
-    driver = webdriver.Firefox()
+  driver = get_firefox_selenium_driver(firefox_profile_path=firefox_profile_path)
 
   if args.user is None: # If no user is specified, then we are getting the logged in user's stuff, so log in if they're not.
     driver.get("https://soundcloud.com/")
@@ -242,8 +250,24 @@ def main(test_args=None):
       else:
         tracks.extend(get_tracks_from_url(driver, get_user_likes_url(driver)))
 
+  driver.quit()
+  if virtual_display is not None:
+    virtual_display.stop()
+
   write_tracks_to_file(tracks, args.file)
   return tracks
+
+def get_virtual_display():
+  display = Display(visible=0, size=(800, 600))
+  display.start()
+  return display
+
+def get_firefox_selenium_driver(firefox_profile_path=None):
+  if firefox_profile_path is not None:
+    profile = webdriver.FirefoxProfile(firefox_profile_path)
+    return webdriver.Firefox(profile)
+  else:
+    return webdriver.Firefox()
 
 def write_tracks_to_file(tracks, destination_file):
   pass
