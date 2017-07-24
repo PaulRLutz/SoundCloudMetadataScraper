@@ -10,6 +10,11 @@ import os
 from os.path import expanduser
 import configparser
 import argparse
+from pyvirtualdisplay import Display
+import logging
+
+log = logging.getLogger()
+log.setLevel(logging.DEBUG)
 
 def get_user_playlists_urls(driver, user_id=None):
   if user_id is not None:
@@ -34,10 +39,10 @@ def get_user_playlists_urls(driver, user_id=None):
     set_names_old = list(set_names)
     set_names = [a.text for a in driver.find_elements_by_xpath('//a[contains(@href, "/sets/")]') if "tracks" not in a.text]
     if len(set_names) > len(set_names_old):
-      print("found new sets, keep scrolling")
+      log.debug("found new sets, keep scrolling")
       pass # found some new set names, so scroll and try again
     else:
-      print("no more sets found")
+      log.debug("no more sets found")
       break # no more set names were found after scrolling, so we're probably done
 
   return [a.get_attribute("href") for a in driver.find_elements_by_xpath('//a[contains(@href, "/sets/")]') if "tracks" not in a.text]
@@ -47,7 +52,7 @@ def get_tracks_from_url(driver, url):
 
   try:
     set_title = driver.find_element_by_class_name("soundTitle__title").text
-    print(f"set title: {set_title}")
+    log.debug(f"set title: {set_title}")
   except NoSuchElementException:
     set_title = None
 
@@ -55,8 +60,8 @@ def get_tracks_from_url(driver, url):
     set_user_element = driver.find_element_by_class_name("soundTitle__username")
     set_user = set_user_element.text
     set_user_id = set_user_element.get_attribute("href")
-    print(f"set user: {set_user}")
-    print(f"set user id: {set_user_id}")
+    log.debug(f"set user: {set_user}")
+    log.debug(f"set user id: {set_user_id}")
   except NoSuchElementException:
     set_user = None
     set_user_id = None
@@ -69,12 +74,12 @@ def get_tracks_from_url(driver, url):
     time.sleep(4) # TODO Replace with wait
     old_track_elements = list(track_elements)
     track_elements = driver.find_elements_by_class_name("trackList__item")
-    print(f"num track elements: {len(track_elements)}, num old track elements: {len(old_track_elements)}")
+    log.debug(f"num track elements: {len(track_elements)}, num old track elements: {len(old_track_elements)}")
     if len(track_elements) > len(old_track_elements):
-      print("found new track_elements, keep scrolling")
+      log.debug("found new track_elements, keep scrolling")
       pass # found some new track_elements, so scroll and try again
     else:
-      print("no more track_elements found")
+      log.debug("no more track_elements found")
       break # no more track_elements were found after scrolling, so we're probably done
   tracks = []
   for track_element in track_elements:
@@ -100,11 +105,13 @@ def get_tracks_from_url(driver, url):
         "artist" : artist,
         "href" : href,
         "go" : go,
-
+        "set_title" : set_title,
+        "set_user" : set_user,
+        "set_user_id" : set_user_id,
         }
     tracks.append(track)
 
-  return (set_title, set_user, tracks, set_user_id)
+  return tracks
 
 def get_firefox_profile_path(profiles_folder_path="~/.mozilla/firefox", profile_name="Profile0"):
   """Gets the path to a firefox profile folder.
@@ -119,33 +126,33 @@ def get_firefox_profile_path(profiles_folder_path="~/.mozilla/firefox", profile_
 
   """
   if not os.path.isdir(expanduser(profiles_folder_path)):
-    print(f"profiles path: {profiles_folder_path} doesn't exist, switching to default")
+    log.warn(f"profiles path: {profiles_folder_path} doesn't exist, switching to default")
     profiles_folder_path = "~/.mozilla/firefox"
     if not os.path.isdir(expanduser(profiles_folder_path)):
-      print("Default profiles path also doesn't exist.")
+      log.error("Default profiles path also doesn't exist.")
       return None
 
   profiles_folder_path = expanduser(profiles_folder_path) # turn ~ into home folder
 
   # check to see if profiles.ini exists
   if not os.path.isfile(profiles_folder_path + os.sep + "profiles.ini"):
-    print("Couldn't find profiles.ini in profiles path.")
+    log.warn("Couldn't find profiles.ini in profiles path.")
     return None
 
   config = configparser.ConfigParser({})
   try:
     config.read(profiles_folder_path + os.sep + "profiles.ini")
   except: # TODO either be more specific in the error catching, or more expressive in the user warning
-    print("Error reading profiles.ini config file.")
+    log.warn("Error reading profiles.ini config file.")
     return None
 
   # default profile is Profile0, try that if user specified profile doesn't exist
   if profile_name not in config.sections():
-    print(f"couldn't find profile name: '{profile_name}', trying Profile0")
+    log.error(f"couldn't find profile name: '{profile_name}', trying Profile0")
     profile_name = "Profile0"
 
   if "Path" not in config[profile_name]:
-    print(f"Couldn't find 'Path' in profile {profile_name}.")
+    log.warn(f"Couldn't find 'Path' in profile {profile_name}.")
     return None
   else:
     return profiles_folder_path + os.sep + config[profile_name]["Path"]
@@ -172,6 +179,12 @@ def main(test_args=None):
       "-i", "--firefox_profile_name",
       default="Profile0",
       help="The name of the firefox profile to use, from the setting.ini in the firefox profile folder (probably ~/.mozilla/firefox). Default is 'Profile0'"
+  )
+  parser.add_argument(
+      "-v", "--virtual",
+      action="store_true",
+      default=True,
+      help="Perform the scraping in a virtual display if True."
   )
   parser.add_argument(
       "-p", "--playlists",
@@ -203,14 +216,13 @@ def main(test_args=None):
   else:
     args = parser.parse_args()
 
+  if args.virtual:
+    virtual_display = get_virtual_display()
+  else:
+    virtual_display = None
 
   firefox_profile_path = get_firefox_profile_path(profile_name=args.firefox_profile_name)
-
-  if firefox_profile_path is not None:
-    profile = webdriver.FirefoxProfile(firefox_profile_path)
-    driver = webdriver.Firefox(profile)
-  else:
-    driver = webdriver.Firefox()
+  driver = get_firefox_selenium_driver(firefox_profile_path=firefox_profile_path)
 
   if args.user is None: # If no user is specified, then we are getting the logged in user's stuff, so log in if they're not.
     driver.get("https://soundcloud.com/")
@@ -222,7 +234,7 @@ def main(test_args=None):
     tracks = get_tracks_from_url(driver, args.url)
   else:
     if not args.playlists and not args.albums and not args.songs and not args.likes:
-      print("Please specify which songs to download.")
+      log.error("Please specify which songs to download.")
       return
     if args.playlists:
       for url in get_user_playlists_urls(driver, args.user):
@@ -238,12 +250,28 @@ def main(test_args=None):
       tracks.extend(get_tracks_from_url(driver, user_tracks_url))
     if args.likes:
       if args.user is None:
-        print("User needs to be logged in to get their liked tracks")
+        log.error("User needs to be logged in to get their liked tracks")
       else:
         tracks.extend(get_tracks_from_url(driver, get_user_likes_url(driver)))
 
+  driver.quit()
+  if virtual_display is not None:
+    virtual_display.stop()
+
   write_tracks_to_file(tracks, args.file)
   return tracks
+
+def get_virtual_display():
+  display = Display(visible=0, size=(800, 600))
+  display.start()
+  return display
+
+def get_firefox_selenium_driver(firefox_profile_path=None):
+  if firefox_profile_path is not None:
+    profile = webdriver.FirefoxProfile(firefox_profile_path)
+    return webdriver.Firefox(profile)
+  else:
+    return webdriver.Firefox()
 
 def write_tracks_to_file(tracks, destination_file):
   pass
