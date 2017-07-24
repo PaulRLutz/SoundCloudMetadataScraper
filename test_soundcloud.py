@@ -3,7 +3,8 @@ from soundcloud import *
 
 class SoundcloudTest(unittest.TestCase):
 
-  def setUp(self):
+  @classmethod
+  def setUpClass(self):
     self.driver = get_firefox_selenium_driver()
 
   def test_example_1(self):
